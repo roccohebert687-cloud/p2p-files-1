@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Eaglercraft Versions</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #1f2937;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #60a5fa;
+      --border: #334155;
+      --active: #1d4ed8;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+
+    body {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    #sidebar {
+      width: 360px;
+      min-width: 260px;
+      max-width: 42vw;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 12px;
+      overflow: auto;
+    }
+
+    #viewer {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #0b1120;
+    }
+
+    #toolbar {
+      background: var(--panel-2);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 54px;
+    }
+
+    #currentName {
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 70%;
+    }
+
+    #status {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    #toolbarActions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    #openBlank {
+      flex: 0 0 auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 11px;
+      color: var(--text);
+      background: #0b1220;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    #openBlank:hover { border-color: var(--accent); background: #101b2f; }
+    #openBlank:disabled { opacity: .45; cursor: not-allowed; }
+
+    #filter {
+      width: 100%;
+      margin: 8px 0 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--text);
+      outline: none;
+    }
+
+    #fileList {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .file {
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 10px;
+      cursor: pointer;
+      transition: 0.15s ease;
+      color: var(--text);
+      word-break: break-word;
+      line-height: 1.3;
+    }
+
+    .file:hover {
+      border-color: var(--accent);
+      background: #101b2f;
+    }
+
+    .file.active {
+      background: rgba(37, 99, 235, 0.18);
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.24);
+    }
+
+    iframe {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: white;
+    }
+
+    .rawLink {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 12px;
+    }
+
+    .rawLink:hover { text-decoration: underline; }
+
+    @media (max-width: 800px) {
+      body { flex-direction: column; }
+      #sidebar {
+        width: 100%;
+        max-width: 100%;
+        max-height: 42vh;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+    }
+  </style>
+</head>
+<body>
+  <aside id="sidebar">
+    <h3 style="margin: 4px 0 10px;">Eaglercraft Versions</h3>
+    <input id="filter" type="search" placeholder="Filter files..." />
+    <div id="fileList"></div>
+    <div style="margin-top: 12px; font-size: 12px; color: var(--muted);">
+      <a id="rawLink" class="rawLink" href="#" target="_blank" rel="noopener">Open raw file</a>
+    </div>
+  </aside>
+
+  <main id="viewer">
+    <div id="toolbar">
+      <div id="currentName">Loading...</div>
+      <div id="toolbarActions">
+        <div id="status">Fetching file list…</div>
+        <button id="openBlank" type="button" disabled>Open in about:blank ↗</button>
+      </div>
+    </div>
+    <iframe id="frame" title="Version preview" srcdoc="<p style='font-family:sans-serif;padding:20px;color:#111'>Select a file from the left.</p>"></iframe>
+  </main>
+
+  <script>
+    const owner = "EaglercraftNOA";
+    const repo = "version";
+    const branch = "main";
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents`;
+    const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/`;
+
+    const fileList = document.getElementById("fileList");
+    const filterInput = document.getElementById("filter");
+    const frame = document.getElementById("frame");
+    const currentName = document.getElementById("currentName");
+    const status = document.getElementById("status");
+    const rawLink = document.getElementById("rawLink");
+    const openBlankButton = document.getElementById("openBlank");
+
+    let allFiles = [];
+    let activeName = "";
+    let activeHTML = "";
+
+    function encodeGitHubPath(name) {
+      return encodeURIComponent(name).replace(/%20/g, " ");
+    }
+
+    // Sort by the actual dotted version number first (e.g. 1.15 > 1.8.8),
+    // then use natural filename order as a tie-breaker.
+    function getVersionParts(name) {
+      const match = name.match(/(?:^|[^0-9])(\d+\.\d+(?:\.\d+)?)(?=[^0-9]|$)/);
+      return match ? match[1].split(".").map(Number) : null;
+    }
+
+    function sortNames(a, b) {
+      const av = getVersionParts(a);
+      const bv = getVersionParts(b);
+      if (av && bv) {
+        const length = Math.max(av.length, bv.length);
+        for (let i = 0; i < length; i++) {
+          const an = av[i] ?? 0;
+          const bn = bv[i] ?? 0;
+          if (an !== bn) return bn - an;
+        }
+      } else if (av || bv) {
+        return av ? -1 : 1;
+      }
+      return b.localeCompare(a, undefined, { numeric: true, sensitivity: "base" });
+    }
+
+    function renderList(items) {
+      fileList.innerHTML = "";
+      items.forEach((name) => {
+        const div = document.createElement("div");
+        div.className = "file";
+        div.textContent = name;
+        div.title = name;
+        div.addEventListener("click", () => openFile(name, div));
+        if (name === activeName) div.classList.add("active");
+        fileList.appendChild(div);
+      });
+    }
+
+    async function loadFiles() {
+      try {
+        status.textContent = "Fetching file list…";
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error(`GitHub API failed: ${res.status}`);
+        const data = await res.json();
+
+        allFiles = (Array.isArray(data) ? data : [])
+          .filter(item => item.type === "file" && /\.html?$/i.test(item.name))
+          .map(item => item.name)
+          .sort(sortNames);
+
+        const filtered = allFiles;
+        renderList(filtered);
+
+        if (filtered.length) {
+          openFile(filtered[0]);
+        } else {
+          currentName.textContent = "No HTML files found";
+          status.textContent = "Repo has no .html files";
+        }
+      } catch (err) {
+        console.error(err);
+        status.textContent = "GitHub API failed; using fallback list";
+        allFiles = [
+          "Eaglercraft-1.0.html",
+          "Eaglercraft-1.6.4.html",
+          "Eaglercraft_1.2.3_JS.html",
+          "Classic 0.30-JS.html",
+          "Eaglercraft 1.8.8 .html",
+          "Eaglercraft-1.13.2-JS.html"
+        ].sort(sortNames);
+
+        renderList(allFiles);
+        openFile(allFiles[0]);
+      }
+    }
+
+    async function openFile(name, element) {
+      activeName = name;
+
+      Array.from(fileList.children).forEach(node => node.classList.remove("active"));
+      if (element) element.classList.add("active");
+      else {
+        const match = [...fileList.children].find(node => node.textContent === name);
+        if (match) match.classList.add("active");
+      }
+
+      currentName.textContent = name;
+      const rawUrl = rawBase + encodeGitHubPath(name);
+      rawLink.href = rawUrl;
+      status.textContent = "Loading…";
+
+      try {
+        const response = await fetch(rawUrl);
+        if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
+
+        const text = await response.text();
+
+        // Insert a base tag so relative media/links inside the HTML resolve to the repo raw URL
+        const withBase = /<head\b[^>]*>/i.test(text)
+          ? text.replace(/<head\b[^>]*>/i, match => `${match}<base href="${rawBase}">`)
+          : `<base href="${rawBase}">` + text;
+
+        activeHTML = withBase;
+        openBlankButton.disabled = false;
+        frame.srcdoc = withBase;
+        status.textContent = "Loaded";
+      } catch (err) {
+        console.error(err);
+        activeHTML = "";
+        openBlankButton.disabled = true;
+        const githubBlobUrl = `https://github.com/${owner}/${repo}/blob/${branch}/${encodeGitHubPath(name)}`;
+        frame.src = githubBlobUrl;
+        status.textContent = "Could not load raw HTML; opened GitHub blob instead";
+      }
+    }
+
+    openBlankButton.addEventListener("click", () => {
+      if (!activeHTML) return;
+      // Open synchronously from the click so popup blockers allow it.
+      const popup = window.open("about:blank", "_blank");
+      if (!popup) {
+        status.textContent = "Popup blocked — allow popups and try again";
+        return;
+      }
+      try {
+        popup.document.open();
+        popup.document.write(activeHTML);
+        popup.document.close();
+        popup.document.title = activeName;
+        status.textContent = `Opened ${activeName} in about:blank`;
+      } catch (err) {
+        popup.close();
+        status.textContent = "Could not open this file in a blank tab";
+        console.error(err);
+      }
+    });
+
+    filterInput.addEventListener("input", () => {
+      const q = filterInput.value.trim().toLowerCase();
+      const filtered = !q ? allFiles : allFiles.filter(name => name.toLowerCase().includes(q));
+      renderList(filtered);
+
+      if (filtered.length && !filtered.includes(activeName)) {
+        const first = filtered[0];
+        openFile(first);
+      }
+    });
+
+    loadFiles();
+  </script>
+</body>
+</html>
